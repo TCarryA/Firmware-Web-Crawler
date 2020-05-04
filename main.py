@@ -39,20 +39,44 @@ def init_db(db_server, db_name, url, debug):
     collection = db[url]
 
     if debug:
-        print("Created " + url + " collection in " + db_name + " database(mongodb server: " + db_server + ")")
+        print("[DEBUG] Created " + url + " collection in " + db_name + " database (mongodb server: " + db_server + ")")
     return collection
 
+def get_downloads_page_url(url, debug):
+    """
+    This function crawles the given url to find the the page which contains the firmwares
+    @param0: url - the url we look in for the download page, might be the download page
+    @param1: debug - is the progam running in debug mode
+    @return: url of the page which contains the firmwares
+    """
+    data = requests.get(url).content
+    soup = BeautifulSoup(data, "lxml")
+    links = soup.findAll('a', {'title': "Download"})
+
+    if debug and len(links) > 1:
+        print("[DEBUG] Found more then one link to download page, preceding with the first.")
+
+    if len(links) == 0:
+        print("Found no links to download page, assuming that the given url is the download page.")
+        return url
+
+    return url + links[0].attrs['href']
+
 def main():
-    #init the parser
+    #Init the parser
     parser = init_parser()
     args = parser.parse_args()
     debug = args.debug
     if debug:
-        print(args)
+        print("[DEBUG] The args of the program are: " + str(args))
 
-    #init the database
+    #Init the database
     db = init_db(args.dbserver, args.dbname, args.url, debug)
 
+    #Get the link to the downloads page
+    downloads_url = get_downloads_page_url(args.url, args.debug)
+    if debug:
+        print("[DEBUG] The url where downloads are located is: " + downloads_url)
 
 if __name__ == "__main__":
     main()
