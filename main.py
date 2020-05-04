@@ -33,8 +33,7 @@ def init_db(db_server, db_name, url, debug):
     db = db_client[db_name]
 
     #We only want the tld part of the domain to serve as the collection name
-    url = url.replace("https://", "")
-    url = url.split("/")[0]
+    url = url.replace("https://", "").replace("www.", "").split("/")[0]
     if url in db.collection_names():
         print(url + " is already in our database, we will check for changes in it.")
     collection = db[url]
@@ -88,6 +87,23 @@ def crawl_metadata(url, db, debug):
         
         if debug:
             print(", ".join([brand, model, title, stock_rom, android_version, author]))
+
+        db.update(
+            {
+                "title" : title
+             },
+            { 
+                "$setOnInsert":#title will be inserted automatically 
+                {
+                    "brand" : brand,
+                    "model" : model,
+                    "stock_rom" : stock_rom,
+                    "android_version" : android_version,
+                    "author" : author
+                }
+            },
+            upsert=True
+        )
 
 def find_by_view_field(item, view_field):
     """
