@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import pymongo
 import argparse
+import re
 
 def init_parser():
     """
@@ -53,6 +54,10 @@ def get_downloads_page_url(url, debug):
     soup = BeautifulSoup(data, "lxml")
     links = soup.findAll('a', {'title': "Download"})
 
+    #Fix an issue when the link provided to the program is in wrong format, the website redirects to home page if there's no www
+    if 'www' not in url:
+        url = url.replace("https://", "https://www.")
+
     if debug and len(links) > 1:
         print("[DEBUG] Found more then one link to download page, preceding with the first.")
 
@@ -61,6 +66,38 @@ def get_downloads_page_url(url, debug):
         return url
 
     return url + links[0].attrs['href']
+
+def crawl_metadata(url, db, debug):
+    """
+    This function crawls the metadata of all available firmwares from the downloads pages and puts them into the database 
+    @param0: url - the url of the downloads pages
+    @param1: db - object of collections, we will put the metadata that we find into it
+    @param2: debug - is the progam running in debug mode
+    """
+    data = requests.get(url).content
+    soup = BeautifulSoup(data, "lxml")
+    items = soup.findAll('table')[0].findAll('tr')
+
+    for current in items[1:]:#items[0] is the titles of the table
+        brand = find_by_view_field(current, 'views-field views-field-field-brand')
+        model = find_by_view_field(current, 'views-field views-field-field-model')
+        title = find_by_view_field(current, 'views-field views-field-title')
+        stock_rom = find_by_view_field(current, 'views-field views-field-field-stock-rom')
+        android_version = find_by_view_field(current, 'views-field views-field-field-android-version2')
+        author = find_by_view_field(current, 'views-field views-field-field-firmware-author')
+        
+        if debug:
+            print(", ".join([brand, model, title, stock_rom, android_version, author]))
+
+def find_by_view_field(item, view_field):
+    """
+    This function finds view_field in item and formats it(removes unnecessary spaces and new-lines)
+    @param0: item - the item that we want to find the view_field in
+    @param1: view_field - the view filed we want to find
+    @return: formated text of the view_field
+    """
+    field = item.findAll('td', {'class': view_field})[0].text
+    return re.sub("^\s+|\s+$", "", field)
 
 def main():
     #Init the parser
@@ -77,6 +114,8 @@ def main():
     downloads_url = get_downloads_page_url(args.url, args.debug)
     if debug:
         print("[DEBUG] The url where downloads are located is: " + downloads_url)
+
+    crawl_metadata(downloads_url, db, args.debug)
 
 if __name__ == "__main__":
     main()
