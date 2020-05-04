@@ -35,7 +35,7 @@ def init_db(db_server, db_name, url, debug):
     #We only want the tld part of the domain to serve as the collection name
     url = url.replace("https://", "").replace("www.", "").split("/")[0]
     if url in db.collection_names():
-        print(url + " is already in our database, we will check for changes in it.")
+        print(url + " is already in our database, we will check for changes and update if there's any.")
     collection = db[url]
 
     if debug:
@@ -66,44 +66,57 @@ def get_downloads_page_url(url, debug):
 
     return url + links[0].attrs['href']
 
-def crawl_metadata(url, db, debug):
+def crawl_metadata(base_url, downloads_url, db, debug):
     """
     This function crawls the metadata of all available firmwares from the downloads pages and puts them into the database 
     @param0: url - the url of the downloads pages
     @param1: db - object of collections, we will put the metadata that we find into it
     @param2: debug - is the progam running in debug mode
     """
-    data = requests.get(url).content
-    soup = BeautifulSoup(data, "lxml")
-    items = soup.findAll('table')[0].findAll('tr')
+    if debug:
+        print("[DEBUG] List of firmwares found(brand, model, title, stock_rom, android_version, author ,url): ")        
 
-    for current in items[1:]:#items[0] is the titles of the table
-        brand = find_by_view_field(current, 'views-field views-field-field-brand')
-        model = find_by_view_field(current, 'views-field views-field-field-model')
-        title = find_by_view_field(current, 'views-field views-field-title')
-        stock_rom = find_by_view_field(current, 'views-field views-field-field-stock-rom')
-        android_version = find_by_view_field(current, 'views-field views-field-field-android-version2')
-        author = find_by_view_field(current, 'views-field views-field-field-firmware-author')
+    while True:
+        data = requests.get(downloads_url).content
+        soup = BeautifulSoup(data, "lxml")
+        items = soup.findAll('table')[0].findAll('tr')#get the items inside the table
         
-        if debug:
-            print(", ".join([brand, model, title, stock_rom, android_version, author]))
+        #Check for next page, update it if theres next or quit if theres no further pages
+        next = soup.findAll('a', {'title': "Go to next page"})#next page
+        if len(next) == 0:
+            break#exit the loop if there's no next
+        downloads_url = base_url + next[0].attrs['href']
 
-        db.update(
-            {
-                "title" : title
-             },
-            { 
-                "$setOnInsert":#title will be inserted automatically 
+        #Parse the items and send them to the database
+        for current in items[1:]:#items[0] is the titles of the table
+            brand = find_by_view_field(current, 'views-field views-field-field-brand')
+            model = find_by_view_field(current, 'views-field views-field-field-model')
+            title = find_by_view_field(current, 'views-field views-field-title')
+            stock_rom = find_by_view_field(current, 'views-field views-field-field-stock-rom')
+            android_version = find_by_view_field(current, 'views-field views-field-field-android-version2')
+            author = find_by_view_field(current, 'views-field views-field-field-firmware-author')
+            item_url = current.findAll('td', {'class': 'views-field views-field-title'})[0].find('a').attrs['href']
+
+            if debug:
+                print("[DEBUG] >> " + ", ".join([brand, model, title, stock_rom, android_version, author, item_url]))
+
+            db.update(
                 {
-                    "brand" : brand,
-                    "model" : model,
-                    "stock_rom" : stock_rom,
-                    "android_version" : android_version,
-                    "author" : author
-                }
-            },
-            upsert=True
-        )
+                    "title" : title
+                },
+                { 
+                    "$set":#title will be inserted automatically 
+                    {
+                        "brand" : brand,
+                        "model" : model,
+                        "stock_rom" : stock_rom,
+                        "android_version" : android_version,
+                        "author" : author,
+                        "url" : item_url
+                    }
+                },
+                upsert=True
+            )
 
 def find_by_view_field(item, view_field):
     """
@@ -131,7 +144,7 @@ def main():
     if debug:
         print("[DEBUG] The url where downloads are located is: " + downloads_url)
 
-    crawl_metadata(downloads_url, db, args.debug)
+    crawl_metadata(args.url, downloads_url, db, args.debug)
 
 if __name__ == "__main__":
     main()
