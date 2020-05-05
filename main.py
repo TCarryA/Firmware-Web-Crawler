@@ -19,7 +19,7 @@ def init_parser():
     parser.add_argument("-f", "--folder", default="firmwares/"
                         , help="specify a location to save firmwares to(defualt is firmwares/)")                 
     parser.add_argument("-d", "--debug", action="store_true"
-                        , help="run the program with more prints")
+                        , help="run the program with more prints(debug mode)")
     parser.add_argument("url", help="specify the url of the site you want to crawl firmware from")
     return parser
 
@@ -166,7 +166,7 @@ def download_firmwares(db, base_url, save_location, debug):
     if path.isdir(save_location) is False:
         makedirs(save_location)#makedirs to allow a folder inside of a folder
 
-    for url in urls:
+    for index, url in enumerate(urls):
         filename = save_location + url.split("/")[-1]
         #Use stream to get the data as chunks
         with requests.get(url, stream=True) as r, open(filename, "wb") as f:
@@ -175,9 +175,13 @@ def download_firmwares(db, base_url, save_location, debug):
 
                 if debug:
                     print("[DEBUG] Wrote a chunk of " + str(len(chunk)) + " bytes to " + filename)
-        
-        print(filename + " was downloaded successfully!")
-           
+
+            if debug:
+                print("[DEBUG] " + filename + " was downloaded successfully!")
+
+        #Print progress message every ~5%
+        if int(len(urls) / 20) == index:
+            print("Finished {:.2f}% of the download.".format((index / len(urls)) * 100))    
 
 def main():
     #Init the parser
@@ -186,6 +190,7 @@ def main():
     debug = args.debug
     if debug:
         print("[DEBUG] The args of the program are: " + str(args))
+    print("Crawling the website " + args.url + " for firmwares.")
 
     #Init the database
     db = init_db(args.dbserver, args.dbname, args.url, debug)
