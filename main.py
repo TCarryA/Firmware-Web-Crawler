@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import pymongo
 import argparse
 import re
+from os import path, makedirs
 
 def init_parser():
     """
@@ -36,8 +37,8 @@ def init_db(db_server, db_name, url, debug):
 
     #We only want the tld part of the domain to serve as the collection name
     url = url.replace("https://", "").replace("www.", "").split("/")[0]
-    if url in db.collection_names():
-        print(url + " is already in our database, we will check for changes and update if there's any.")
+    if url in db.collection_names() and debug:
+        print("[DEBUG]" + url + " is already in our database, we will check for changes and update if there's any.")
     collection = db[url]
 
     if debug:
@@ -88,14 +89,14 @@ def crawl_metadata(base_url, downloads_url, db, debug):
         downloads_url = base_url + next[0].attrs['href']
 
         #Parse the items and send them to the database
-        for current in items[1:]:#items[0] is the titles of the table
-            brand = find_by_view_field(current, 'views-field views-field-field-brand')
-            model = find_by_view_field(current, 'views-field views-field-field-model')
-            title = find_by_view_field(current, 'views-field views-field-title')
-            stock_rom = find_by_view_field(current, 'views-field views-field-field-stock-rom')
-            android_version = find_by_view_field(current, 'views-field views-field-field-android-version2')
-            author = find_by_view_field(current, 'views-field views-field-field-firmware-author')
-            item_url = current.findAll('td', {'class': 'views-field views-field-title'})[0].find('a').attrs['href'].replace('\\', '/')
+        for item in items[1:]:#items[0] is the titles of the table
+            brand = find_by_view_field(item, 'views-field views-field-field-brand')
+            model = find_by_view_field(item, 'views-field views-field-field-model')
+            title = find_by_view_field(item, 'views-field views-field-title')
+            stock_rom = find_by_view_field(item, 'views-field views-field-field-stock-rom')
+            android_version = find_by_view_field(item, 'views-field views-field-field-android-version2')
+            author = find_by_view_field(item, 'views-field views-field-field-firmware-author')
+            item_url = item.findAll('td', {'class': 'views-field views-field-title'})[0].find('a').attrs['href'].replace('\\', '/')
 
             if debug:
                 print("[DEBUG] >> " + ", ".join([brand, model, title, stock_rom, android_version, author, item_url]))
@@ -137,26 +138,46 @@ def download_firmwares(db, base_url, save_location, debug):
     @param3: debug - is the progam running in debug mode
     @return: None
     """
-    for current in db.find():
-        print(base_url + current['url'])
-        data = requests.get(base_url + current['url']).content
+    urls = list()#A list to save urls to
+    if debug:
+        print("[DEBUG] Fetching links for downloading firmwares")
+
+    for firmware in db.find():
+        data = requests.get(base_url + firmware['url']).content
         soup = BeautifulSoup(data, "lxml")
 
-        #Find the tag that holds the download link
-        download_link = soup.find('a', {"type": re.compile("application\/zip*")})
+        #Check for a valid download link
+        download_link = soup.find('a', {'href':re.compile('(.*\.zip|.*\.rar)')})
 
-        #There's some pages with other download link location
-        if download_link == None:
-            download_link = soup.find('div', 
-                {"class": "field field-name-field-firmware-image-download field-type-text field-label-above"})
-
-            #There's some pages with no link at all
-            if download_link != None:
-                download_link = download_link.find('a')
+        #Save the download link
         if download_link != None:
-            print(download_link.attrs['href'])
-        else:
-            print("None")
+            urls.append(download_link.attrs['href'])
+        elif debug:
+            print("[DEBUG] No download link found for " + base_url + firmware['url'])
+    
+    #Download the firmwars from the urls
+    print("Starting to download the firmwares.")
+
+    #If we don't save the file to a directory by any chance(maybe user froget to add /)
+    if "/" not in save_location:
+        save_location = save_location + "/"
+    
+    #Create the directory in which we save the file if it doesn't exsits
+    if path.isdir(save_location) is False:
+        makedirs(save_location)#makedirs to allow a folder inside of a folder
+
+    for url in urls:
+        filename = save_location + url.split("/")[-1]
+        #Use stream to get the data as chunks
+        with requests.get(url, stream=True) as r, open(filename, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+                if debug:
+                    print("[DEBUG] Wrote a chunk of " + str(len(chunk)) + " bytes to " + filename)
+        
+        print(filename + " was downloaded successfully!")
+           
 
 def main():
     #Init the parser
