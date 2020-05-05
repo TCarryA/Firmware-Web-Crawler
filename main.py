@@ -15,6 +15,8 @@ def init_parser():
                         , help="specify a mongodb server address to save results to(defualt is mongodb://localhost:27017/)")
     parser.add_argument("-dbn", "--dbname", default="firmware_database"
                         , help="specify a database to save results to(defualt is firmware_database)")
+    parser.add_argument("-f", "--folder", default="firmwares/"
+                        , help="specify a location to save firmwares to(defualt is firmwares/)")                 
     parser.add_argument("-d", "--debug", action="store_true"
                         , help="run the program with more prints")
     parser.add_argument("url", help="specify the url of the site you want to crawl firmware from")
@@ -51,20 +53,17 @@ def get_downloads_page_url(url, debug):
     """
     data = requests.get(url).content
     soup = BeautifulSoup(data, "lxml")
-    links = soup.findAll('a', {'title': "Download"})
+    link = soup.find('a', {'title': "Download"})
 
     #Fix an issue when the link provided to the program is in wrong format, the website redirects to home page if there's no www
     if 'www' not in url:
         url = url.replace("https://", "https://www.")
 
-    if debug and len(links) > 1:
-        print("[DEBUG] Found more then one link to download page, preceding with the first.")
-
-    if len(links) == 0:
+    if link == None:
         print("Found no links to download page, assuming that the given url is the download page.")
         return url
 
-    return url + links[0].attrs['href']
+    return url + link.attrs['href']
 
 def crawl_metadata(base_url, downloads_url, db, debug):
     """
@@ -72,6 +71,7 @@ def crawl_metadata(base_url, downloads_url, db, debug):
     @param0: url - the url of the downloads pages
     @param1: db - object of collections, we will put the metadata that we find into it
     @param2: debug - is the progam running in debug mode
+    @return: None
     """
     if debug:
         print("[DEBUG] List of firmwares found(brand, model, title, stock_rom, android_version, author ,url): ")        
@@ -95,7 +95,7 @@ def crawl_metadata(base_url, downloads_url, db, debug):
             stock_rom = find_by_view_field(current, 'views-field views-field-field-stock-rom')
             android_version = find_by_view_field(current, 'views-field views-field-field-android-version2')
             author = find_by_view_field(current, 'views-field views-field-field-firmware-author')
-            item_url = current.findAll('td', {'class': 'views-field views-field-title'})[0].find('a').attrs['href']
+            item_url = current.findAll('td', {'class': 'views-field views-field-title'})[0].find('a').attrs['href'].replace('\\', '/')
 
             if debug:
                 print("[DEBUG] >> " + ", ".join([brand, model, title, stock_rom, android_version, author, item_url]))
@@ -128,6 +128,36 @@ def find_by_view_field(item, view_field):
     field = item.findAll('td', {'class': view_field})[0].text
     return re.sub("^\s+|\s+$", "", field)
 
+def download_firmwares(db, base_url, save_location, debug):
+    """
+    This funciton will access the database, retrive the urls of the firmwares to download and download them
+    @param0: db - object of collections, used to get the url of the firmwares(they are stored in the database when we crawl the metadata) 
+    @param1: base_url - the url of the website(will append the url of the firmware to it)
+    @param2: save_location - the folder in which the firmwars are downloaded to
+    @param3: debug - is the progam running in debug mode
+    @return: None
+    """
+    for current in db.find():
+        print(base_url + current['url'])
+        data = requests.get(base_url + current['url']).content
+        soup = BeautifulSoup(data, "lxml")
+
+        #Find the tag that holds the download link
+        download_link = soup.find('a', {"type": re.compile("application\/zip*")})
+
+        #There's some pages with other download link location
+        if download_link == None:
+            download_link = soup.find('div', 
+                {"class": "field field-name-field-firmware-image-download field-type-text field-label-above"})
+
+            #There's some pages with no link at all
+            if download_link != None:
+                download_link = download_link.find('a')
+        if download_link != None:
+            print(download_link.attrs['href'])
+        else:
+            print("None")
+
 def main():
     #Init the parser
     parser = init_parser()
@@ -144,7 +174,11 @@ def main():
     if debug:
         print("[DEBUG] The url where downloads are located is: " + downloads_url)
 
+    #Get the metadata of all firmwares
     crawl_metadata(args.url, downloads_url, db, args.debug)
+
+    #Download all of the firmwares
+    download_firmwares(db, args.url, args.folder, args.debug)
 
 if __name__ == "__main__":
     main()
