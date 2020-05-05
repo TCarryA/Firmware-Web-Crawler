@@ -173,9 +173,6 @@ def download_firmwares(db, base_url, save_location, debug):
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-                if debug:
-                    print("[DEBUG] Wrote a chunk of " + str(len(chunk)) + " bytes to " + filename)
-
             if debug:
                 print("[DEBUG] " + filename + " was downloaded successfully!")
 
