@@ -35,8 +35,8 @@ def init_db(db_server, db_name, url, debug):
     db_client = pymongo.MongoClient(db_server)
     db = db_client[db_name]
 
-    #We only want the tld part of the domain to serve as the collection name
-    url = url.replace("https://", "").replace("www.", "").split("/")[0]
+    #We only want the tld and domain to serve as the collection name
+    url = url.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
     if url in db.collection_names() and debug:
         print("[DEBUG]" + url + " is already in our database, we will check for changes and update if there's any.")
     collection = db[url]
@@ -56,10 +56,6 @@ def get_downloads_page_url(url, debug):
     soup = BeautifulSoup(data, "lxml")
     link = soup.find('a', {'title': "Download"})
 
-    #Fix an issue when the link provided to the program is in wrong format, the website redirects to home page if there's no www
-    if 'www' not in url:
-        url = url.replace("https://", "https://www.")
-
     if link == None:
         print("Found no links to download page, assuming that the given url is the download page.")
         return url
@@ -75,7 +71,7 @@ def crawl_metadata(base_url, downloads_url, db, debug):
     @return: None
     """
     if debug:
-        print("[DEBUG] List of firmwares found(brand, model, title, stock_rom, android_version, author ,url): ")        
+        print("[DEBUG] List of firmwares found(brand, model, title, stock_rom, android_version, author, last_modified, rockchip_chipset): ")        
 
     while True:
         data = requests.get(downloads_url).content
@@ -96,10 +92,26 @@ def crawl_metadata(base_url, downloads_url, db, debug):
             stock_rom = find_by_view_field(item, 'views-field views-field-field-stock-rom')
             android_version = find_by_view_field(item, 'views-field views-field-field-android-version2')
             author = find_by_view_field(item, 'views-field views-field-field-firmware-author')
+
+            #Collect more metadata from it's page(last modified date, rockchip_chipset and the download link)
             item_url = item.findAll('td', {'class': 'views-field views-field-title'})[0].find('a').attrs['href'].replace('\\', '/')
+            data = requests.get(base_url + item_url).content
+            soup = BeautifulSoup(data, "lxml")
+
+            last_modified = find_by_view_field(soup, 'field field-name-changed-date field-type-ds field-label-inline clearfix', 'div')
+            rockchip_chipset = find_by_view_field(soup, 'field field-name-field-chipset field-type-taxonomy-term-reference field-label-inline clearfix' \
+                                                    , 'div')
+            download_url = soup.find('a', {'href':re.compile('(.*\.zip|.*\.rar)')})
+
+            last_modified  = re.sub(".*:[^,]*, ", "", last_modified, count=1)#Remove the "Last Modified:" and day of the week
+            rockchip_chipset = re.sub(".*:.?", "", rockchip_chipset)#Remove the "Rockchip Chipset:"    
+            if download_url != None:
+                download_url = download_url.attrs['href']
+            else:
+                download_url = ""
 
             if debug:
-                print("[DEBUG] >> " + ", ".join([brand, model, title, stock_rom, android_version, author, item_url]))
+                print("[DEBUG] >> " + ", ".join([brand, model, title, stock_rom, android_version, author, last_modified, rockchip_chipset]))
 
             db.update(
                 {
@@ -113,48 +125,57 @@ def crawl_metadata(base_url, downloads_url, db, debug):
                         "stock_rom" : stock_rom,
                         "android_version" : android_version,
                         "author" : author,
-                        "url" : item_url
+                        "last_modified" : last_modified,
+                        "rockchip_chipset" : rockchip_chipset,
+                        "download_url" : download_url
                     }
                 },
                 upsert=True
             )
 
-def find_by_view_field(item, view_field):
+def find_by_view_field(item, view_field, tag='td'):
     """
     This function finds view_field in item and formats it(removes unnecessary spaces and new-lines)
     @param0: item - the item that we want to find the view_field in
     @param1: view_field - the view filed we want to find
+    @param2: tag - defaults to 'td', the tag that we want to find the view_field in
     @return: formated text of the view_field
     """
-    field = item.findAll('td', {'class': view_field})[0].text
-    return re.sub("^\s+|\s+$", "", field)
+    field = item.find(type, {'class': view_field})
+    if field != None:
+        return re.sub("^\s+|\s+$", "", field.text)
+    else:
+        return ""
 
-def download_firmwares(db, base_url, save_location, debug):
+
+def get_firmwares_download_link(db, debug):
     """
-    This funciton will access the database, retrive the urls of the firmwares to download and download them
+    This funciton will access the database and retrive the urls of the firmwares to download
     @param0: db - object of collections, used to get the url of the firmwares(they are stored in the database when we crawl the metadata) 
-    @param1: base_url - the url of the website(will append the url of the firmware to it)
-    @param2: save_location - the folder in which the firmwars are downloaded to
-    @param3: debug - is the progam running in debug mode
-    @return: None
+    @param1: debug - is the progam running in debug mode
+    @return:
     """
     urls = list()#A list to save urls to
     if debug:
         print("[DEBUG] Fetching links for downloading firmwares")
 
     for firmware in db.find():
-        data = requests.get(base_url + firmware['url']).content
-        soup = BeautifulSoup(data, "lxml")
-
-        #Check for a valid download link
-        download_link = soup.find('a', {'href':re.compile('(.*\.zip|.*\.rar)')})
-
         #Save the download link
-        if download_link != None:
-            urls.append(download_link.attrs['href'])
+        if firmware['download_url'] != "":
+            urls.append(firmware['download_url'])
         elif debug:
-            print("[DEBUG] No download link found for " + base_url + firmware['url'])
-    
+            print("[DEBUG] No download link found for " + firmware['title'])
+
+    return urls
+
+def download_firmwares(urls, save_location, debug):
+    """
+    This funciton will download the firmwares from a given list of urls
+    @param0: urls - list of urls to download the firmwares from
+    @param1: save_location - the folder in which the firmwars are downloaded to
+    @param2: debug - is the progam running in debug mode
+    @return: None
+    """
     #Download the firmwars from the urls
     print("Starting to download the firmwares.")
 
@@ -170,8 +191,13 @@ def download_firmwares(db, base_url, save_location, debug):
         filename = save_location + url.split("/")[-1]
         #Use stream to get the data as chunks
         with requests.get(url, stream=True) as r, open(filename, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
+            try:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            except:
+                if debug:
+                    print("[DEBUG] error occurred while downloading " + filename)
 
             if debug:
                 print("[DEBUG] " + filename + " was downloaded successfully!")
@@ -187,6 +213,9 @@ def main():
     debug = args.debug
     if debug:
         print("[DEBUG] The args of the program are: " + str(args))
+    #Fix an issue when the link provided to the program is in wrong format, the website redirects to home page if there's no www
+    if 'www' not in args.url:
+        args.url = args.url.replace("https://", "https://www.").replace("http://", "http://www.")
     print("Crawling the website " + args.url + " for firmwares.")
 
     #Init the database
@@ -201,7 +230,10 @@ def main():
     crawl_metadata(args.url, downloads_url, db, args.debug)
 
     #Download all of the firmwares
-    download_firmwares(db, args.url, args.folder, args.debug)
+    urls = get_firmwares_download_link(db, args.debug)
+    download_firmwares(urls, args.folder, args.debug)
+
+    print("Finished downloading all of the available firmwares.")
 
 if __name__ == "__main__":
     main()
