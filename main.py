@@ -15,8 +15,8 @@ def init_parser():
     example_text = '''Examples:
 
  python3 main.py https://rockchipfirmware.com/
- python3 mian.py -d https://rockchipfirmware.com/
- python3 test.py -F -d https://rockchipfirmware.com/'''
+ python3 main.py -d https://rockchipfirmware.com/
+ python3 main.py -F -d https://rockchipfirmware.com/'''
     parser = argparse.ArgumentParser(description="Firmware web crawler"
                                     ,epilog=example_text
                                     ,formatter_class=argparse.RawDescriptionHelpFormatter)
