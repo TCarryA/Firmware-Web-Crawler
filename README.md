@@ -23,5 +23,10 @@ optional arguments:
   -d, --debug           run the program with more prints(debug mode)
   -F, --force           force downloading the files even if they are up to
                         date
+examples:
+
+ python3 main.py https://rockchipfirmware.com/
+ python3 mian.py -d https://rockchipfirmware.com/
+ python3 test.py -F -d https://rockchipfirmware.com/
   ```
   This script was tested for https://www.rockchipfirmware.com/ .

@@ -12,7 +12,14 @@ def init_parser():
     This function creates the parser of args that are given to the program
     @return: inited argument parser
     """
-    parser = argparse.ArgumentParser(description="Firmware web crawler")
+    example_text = '''Examples:
+
+ python3 main.py https://rockchipfirmware.com/
+ python3 mian.py -d https://rockchipfirmware.com/
+ python3 test.py -F -d https://rockchipfirmware.com/'''
+    parser = argparse.ArgumentParser(description="Firmware web crawler"
+                                    ,epilog=example_text
+                                    ,formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-dbs", "--dbserver", default="mongodb://localhost:27017/"
                         , help="specify a mongodb server address to save results to(defualt is mongodb://localhost:27017/)")
     parser.add_argument("-dbn", "--dbname", default="firmware_database"
