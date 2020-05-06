@@ -1,7 +1,7 @@
 # Firmware-Web-Crawler
 ## Usage:
 ```
-main.py [-h] [-dbs DBSERVER] [-dbn DBNAME] [-f FOLDER] [-d] url
+main.py [-h] [-dbs DBSERVER] [-dbn DBNAME] [-f FOLDER] [-d] [-F] url
 
 Firmware web crawler
 
@@ -21,5 +21,7 @@ optional arguments:
                         specify a location to save firmwares to(defualt is
                         firmwares/)
   -d, --debug           run the program with more prints(debug mode)
+  -F, --force           force downloading the files even if they are up to
+                        date
   ```
   This script was tested for https://www.rockchipfirmware.com/ .

@@ -5,6 +5,7 @@ import pymongo
 import argparse
 import re
 from os import path, makedirs
+from datetime import datetime
 
 def init_parser():
     """
@@ -20,6 +21,8 @@ def init_parser():
                         , help="specify a location to save firmwares to(defualt is firmwares/)")                 
     parser.add_argument("-d", "--debug", action="store_true"
                         , help="run the program with more prints(debug mode)")
+    parser.add_argument("-F", "--force", action="store_true"
+                        , help='force downloading the files even if they are up to date')
     parser.add_argument("url", help="specify the url of the site you want to crawl firmware from")
     return parser
 
@@ -70,6 +73,7 @@ def crawl_metadata(base_url, downloads_url, db, debug):
     @param2: debug - is the progam running in debug mode
     @return: None
     """
+    print("Crawling the website " + base_url + " for firmwares metadata.")
     if debug:
         print("[DEBUG] List of firmwares found(brand, model, title, stock_rom, android_version, author, last_modified, rockchip_chipset): ")        
 
@@ -103,7 +107,7 @@ def crawl_metadata(base_url, downloads_url, db, debug):
                                                     , 'div')
             download_url = soup.find('a', {'href':re.compile('(.*\.zip|.*\.rar)')})
 
-            last_modified  = re.sub(".*:[^,]*, ", "", last_modified, count=1)#Remove the "Last Modified:" and day of the week
+            last_modified = re.sub(".*:[^,]*, ", "", last_modified, count=1)#Remove the "Last Modified:" and day of the week
             rockchip_chipset = re.sub(".*:.?", "", rockchip_chipset)#Remove the "Rockchip Chipset:"    
             if download_url != None:
                 download_url = download_url.attrs['href']
@@ -148,19 +152,39 @@ def find_by_view_field(item, view_field, tag='td'):
         return ""
 
 
-def get_firmwares_download_link(db, debug):
+def get_firmwares_download_link(db, save_location, debug, force):
     """
-    This funciton will access the database and retrive the urls of the firmwares to download
+    This funciton will access the database and retrive the urls of the firmwares to download.
+    This function also checks if the firmware is already downloaded and there's no updates, if it's then it doesn't include it in the download links
     @param0: db - object of collections, used to get the url of the firmwares(they are stored in the database when we crawl the metadata) 
-    @param1: debug - is the progam running in debug mode
-    @return:
+    @param1: save_location - the folder in which the firmwars are located
+    @param2: debug - is the progam running in debug mode
+    @param3: force - should force downloading the files even if they are up to date
+    @return: list of urls to download from
     """
-    urls = list()#A list to save urls to
+    urls = list()#A list to save urls and modify dates to
     if debug:
         print("[DEBUG] Fetching links for downloading firmwares")
 
     for firmware in db.find():
-        #Save the download link
+        #Check if we need to download again
+        #We assume that every file in the directory is fully downloaded becuase the sizes the site gives for files are not accurate enough
+        #There's some firmwares with no modification date so this solution won't work for all firmwares in the site
+        filename = save_location + firmware['download_url'].split("/")[-1]
+        if path.isfile(filename) is True and force is False:
+            #Check for the modify date, if the modify date on the site is more recent then the file in the dir download the file
+            if firmware['last_modified'] != "":
+                modify_time = datetime.strptime(firmware['last_modified'], '%B %d, %Y - %H:%M')
+                file_modify_time = datetime.fromtimestamp(path.getmtime(filename))#Get modify date of the file
+                #Is the file that we have up to date
+                if file_modify_time > modify_time:
+                    print(filename + " is up to date, skipping.")
+                    continue#we don't want to download the file again if we have it up to date
+            else:
+                #If the file is in the directory but there's no date we assume that its most up to date firmware
+                print(filename + " is up to date, skipping.")
+                continue
+            
         if firmware['download_url'] != "":
             urls.append(firmware['download_url'])
         elif debug:
@@ -172,7 +196,7 @@ def download_firmwares(urls, save_location, debug):
     """
     This funciton will download the firmwares from a given list of urls
     @param0: urls - list of urls to download the firmwares from
-    @param1: save_location - the folder in which the firmwars are downloaded to
+    @param1: save_location - the folder where we are going to download the files to
     @param2: debug - is the progam running in debug mode
     @return: None
     """
@@ -195,6 +219,9 @@ def download_firmwares(urls, save_location, debug):
                 r.raise_for_status()
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
+            except KeyboardInterrupt:
+                #We don't count keyboard interrupt as an exception to the download
+                raise
             except:
                 if debug:
                     print("[DEBUG] error occurred while downloading " + filename)
@@ -216,7 +243,6 @@ def main():
     #Fix an issue when the link provided to the program is in wrong format, the website redirects to home page if there's no www
     if 'www' not in args.url:
         args.url = args.url.replace("https://", "https://www.").replace("http://", "http://www.")
-    print("Crawling the website " + args.url + " for firmwares.")
 
     #Init the database
     db = init_db(args.dbserver, args.dbname, args.url, debug)
@@ -230,7 +256,7 @@ def main():
     crawl_metadata(args.url, downloads_url, db, args.debug)
 
     #Download all of the firmwares
-    urls = get_firmwares_download_link(db, args.debug)
+    urls = get_firmwares_download_link(db, args.folder, args.debug, args.force)
     download_firmwares(urls, args.folder, args.debug)
 
     print("Finished downloading all of the available firmwares.")
